@@ -4,7 +4,7 @@ import math
 
 import bpy
 import numpy as np
-from bpy.props import BoolProperty, EnumProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from mathutils import Matrix
 
 
@@ -196,56 +196,48 @@ def port_labels(tool, element):
     return out
 
 
-_ENUM_CACHE = {}  # Blender needs the item strings kept alive
+def effective_ports(tool, context, r=None):
+    """(moving, target, moving port or None, target port or None) for the current selection.
+
+    A selected port arrow wins; otherwise the port clicked in the IFC Lib panel
+    (kept while the same two elements are selected); otherwise Auto (None)."""
+    r = r or picked(tool, context)
+    if isinstance(r, str):
+        return r
+    moving, target, only_m, only_t = r
+    d = context.scene.ifclib_dock
+    same = (d.moving_el, d.target_el) == (moving.id(), target.id())
+
+    def stored(el, pid):
+        if not same or not pid:
+            return None
+        try:
+            p = tool.Ifc.get().by_id(int(pid))
+        except (RuntimeError, ValueError):
+            return None
+        return p if p in tool.System.get_ports(el) else None
+    return (moving, target, only_m or stored(moving, d.moving_port), only_t or stored(target, d.target_port),
+            only_m is not None, only_t is not None)
 
 
-def _port_items(element_id):
-    items = [("AUTO", "Auto", "Pick the best port")]
-    try:
-        import bonsai.tool as tool
-        el = tool.Ifc.get().by_id(element_id) if element_id else None
-        if el is not None:
-            items += [(str(p.id()), label, "") for p, label in port_labels(tool, el)]
-    except Exception:
-        pass
-    _ENUM_CACHE[element_id] = items
-    return items
-
-
-class DockMixin:
-    """Move the active element so its free port meets a free port of the other selected element, and connect them"""
-    bl_idname = "ifclib.dock"
-    bl_label = "Dock by Ports"
-    bl_options = {"REGISTER", "UNDO"}
-
-    pair: IntProperty(name="Port pair", default=0, min=0,
-                      description="0 = best match; increase to try the next pair")
-    rotation: EnumProperty(name="Extra turn around port axis", items=[
-        ("0", "0°", ""), ("90", "90°", ""), ("180", "180°", ""), ("270", "270°", "")], default="0")
+class IFCLIB_DockProps(bpy.types.PropertyGroup):
+    """Dock settings in the IFC Lib panel; clicking a port or a turn re-docks at once."""
+    moving_el: IntProperty()
+    target_el: IntProperty()
+    moving_port: StringProperty()
+    target_port: StringProperty()
+    rotation: IntProperty(default=0)
     flip: BoolProperty(name="Flip direction", default=False,
                        description="The moving port faces the same way as the target port. "
                                    "Use when a port arrow points into the body")
     connect: BoolProperty(name="Connect ports", default=True)
-    # Filled on the first run from the selection; afterwards the lists in the
-    # Adjust Last Operation panel switch the ports.
-    moving_id: IntProperty(options={"HIDDEN", "SKIP_SAVE"})
-    target_id: IntProperty(options={"HIDDEN", "SKIP_SAVE"})
-    moving_port: EnumProperty(name="Moving port", items=lambda self, c: _port_items(self.moving_id),
-                              options={"SKIP_SAVE"})
-    target_port: EnumProperty(name="Target port", items=lambda self, c: _port_items(self.target_id),
-                              options={"SKIP_SAVE"})
-    started: BoolProperty(options={"HIDDEN", "SKIP_SAVE"})
 
-    def draw(self, context):
-        col = self.layout.column()
-        col.prop(self, "moving_port")
-        col.prop(self, "target_port")
-        row = col.row()
-        row.enabled = self.moving_port == "AUTO" or self.target_port == "AUTO"
-        row.prop(self, "pair")
-        col.prop(self, "rotation")
-        col.prop(self, "flip")
-        col.prop(self, "connect")
+
+class DockMixin:
+    """Move the active element so its port meets a port of the other selected element, and connect them"""
+    bl_idname = "ifclib.dock"
+    bl_label = "Dock by Ports"
+    bl_options = {"UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -273,19 +265,15 @@ class DockMixin:
         if not ifc:
             self.report({"ERROR"}, "No IFC project open")
             return {"CANCELLED"}
-        r = picked(tool, context)
+        r = effective_ports(tool, context)
         if isinstance(r, str):
             self.report({"ERROR"}, r)
             return {"CANCELLED"}
-        moving, target, only_m, only_t = r
-        if not self.started or self.moving_id != moving.id() or self.target_id != target.id():
-            self.started = True
-            self.moving_id, self.target_id = moving.id(), target.id()
-            self.moving_port = str(only_m.id()) if only_m else "AUTO"
-            self.target_port = str(only_t.id()) if only_t else "AUTO"
-        else:
-            only_m = ifc.by_id(int(self.moving_port)) if self.moving_port != "AUTO" else None
-            only_t = ifc.by_id(int(self.target_port)) if self.target_port != "AUTO" else None
+        moving, target, only_m, only_t, _, _ = r
+        d = context.scene.ifclib_dock
+        if (d.moving_el, d.target_el) != (moving.id(), target.id()):
+            d.moving_el, d.target_el = moving.id(), target.id()
+            d.rotation, d.flip = 0, False
         obj, other = tool.Ifc.get_object(moving), tool.Ifc.get_object(target)
         if obj is None or other is None:
             self.report({"ERROR"}, "The element is not loaded in the scene")
@@ -301,13 +289,15 @@ class DockMixin:
         if not pairs:
             self.report({"ERROR"}, "One of the elements has no ports")
             return {"CANCELLED"}
-        score, pm, pt, same = pairs[min(self.pair, len(pairs) - 1)]
+        score, pm, pt, same = pairs[0]
+        # remember what was used, so the panel shows it and the next click keeps it
+        d.moving_port, d.target_port = str(pm.id()), str(pt.id())
 
         w = _blender_matrix(_placement(moving.ObjectPlacement), unit)
         mp = _blender_matrix(_placement(pm.ObjectPlacement), unit)
         mt = _blender_matrix(_placement(pt.ObjectPlacement), unit)
         local = w.inverted() @ mp  # port in element coordinates
-        new = mt_pose(mp, mt, _port_size(pm), _port_size(pt), int(self.rotation), self.flip) @ local.inverted()
+        new = mt_pose(mp, mt, _port_size(pm), _port_size(pt), d.rotation % 360, d.flip) @ local.inverted()
         # keep Blender's object offset (if any) out of it: apply the change, not the absolute value
         obj.matrix_world = new @ w.inverted() @ obj.matrix_world
         context.view_layer.update()
@@ -318,7 +308,13 @@ class DockMixin:
             c = tool.System.get_connected_port(p)
             if c is not None and c not in (pm, pt):
                 tool.Ifc.run("system.disconnect_port", port=p)
-        if self.connect and tool.System.get_connected_port(pm) != pt:
+        # re-docking by another pair: the old connection between these two goes
+        target_ports = tool.System.get_ports(target)
+        for p in tool.System.get_ports(moving):
+            c = tool.System.get_connected_port(p)
+            if c is not None and c in target_ports and (p, c) != (pm, pt):
+                tool.Ifc.run("system.disconnect_port", port=p)
+        if d.connect and tool.System.get_connected_port(pm) != pt:
             if tool.System.get_connected_port(pm) is not None:
                 tool.Ifc.run("system.disconnect_port", port=pm)
             tool.Ifc.run("system.connect_port", port1=pm, port2=pt, direction=pm.FlowDirection or "NOTDEFINED")
@@ -360,5 +356,53 @@ class IFCLIB_OT_dock(DockMixin, bpy.types.Operator):
 IFCLIB_OT_dock.__doc__ = DockMixin.__doc__
 
 
+class IFCLIB_OT_dock_option(bpy.types.Operator):
+    """Change a dock setting and dock again"""
+    bl_idname = "ifclib.dock_option"
+    bl_label = "Dock Option"
+    bl_options = {"INTERNAL"}
+
+    action: EnumProperty(items=[("MOVING", "Moving port", ""), ("TARGET", "Target port", ""),
+                                ("TURN", "Turn 90°", ""), ("FLIP", "Flip", "")])
+    value: StringProperty()
+
+    @classmethod
+    def description(cls, context, props):
+        return {"MOVING": "Dock by this port of the moving element",
+                "TARGET": "Dock to this port of the target element",
+                "TURN": "Turn the moving element 90° around the port axis and dock again",
+                "FLIP": "Flip the moving element and dock again"}[props.action]
+
+    def execute(self, context):
+        import bonsai.tool as tool
+        r = picked(tool, context)
+        if isinstance(r, str):
+            self.report({"ERROR"}, r)
+            return {"CANCELLED"}
+        moving, target = r[0], r[1]
+        d = context.scene.ifclib_dock
+        if (d.moving_el, d.target_el) != (moving.id(), target.id()):
+            d.moving_el, d.target_el = moving.id(), target.id()
+            d.moving_port = d.target_port = ""
+            d.rotation, d.flip = 0, False
+        if self.action == "MOVING":
+            d.moving_port = self.value
+        elif self.action == "TARGET":
+            d.target_port = self.value
+        elif self.action == "TURN":
+            d.rotation = (d.rotation + 90) % 360
+        else:
+            d.flip = not d.flip
+        return bpy.ops.ifclib.dock()
+
+
 def make_classes():
-    return [IFCLIB_OT_dock]
+    return [IFCLIB_DockProps, IFCLIB_OT_dock, IFCLIB_OT_dock_option]
+
+
+def register():
+    bpy.types.Scene.ifclib_dock = bpy.props.PointerProperty(type=IFCLIB_DockProps)
+
+
+def unregister():
+    del bpy.types.Scene.ifclib_dock
