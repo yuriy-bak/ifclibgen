@@ -25,11 +25,13 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     props.register()
+    dock.register()
     update_types.register()
 
 
 def unregister():
     update_types.unregister()
+    dock.unregister()
     props.unregister()
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

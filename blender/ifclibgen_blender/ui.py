@@ -1,5 +1,6 @@
 import bpy
 
+from .dock import port_labels
 from .mesh_type import ports_of, type_source
 from .props import library_dir
 
@@ -12,22 +13,16 @@ def _is_ifc(obj):
         return False
 
 
-def _picked(context):
+def _ports(context):
     try:
         import bonsai.tool as tool
         if tool.Ifc.get() is None:
             return "Open an IFC project (Bonsai)"
     except ImportError:
         return "Bonsai is not enabled"
-    from .dock import picked
-    return picked(tool, context)
-
-
-def _desc(el, port):
-    name = el.Name or el.is_a()
-    if port is None:
-        return name + " (port: auto)"
-    return f"{name}, port {port.Name or '#' + str(port.id())}"
+    from .dock import effective_ports
+    r = effective_ports(tool, context)
+    return r if isinstance(r, str) else (tool, r)
 
 
 class IFCLIB_PT_main(bpy.types.Panel):
@@ -44,15 +39,34 @@ class IFCLIB_PT_main(bpy.types.Panel):
         col = box.column(align=True)
         col.label(text="1. Click the target")
         col.label(text="2. Shift+click the element to move")
-        col.label(text="To pick ports: Show Ports, select arrows")
-        r = _picked(context)
+        col.label(text="3. Dock; click a port below to re-dock by it")
+        r = _ports(context)
         if isinstance(r, str):
             box.label(text=r, icon="INFO")
-        else:
-            moving, target, pm, pt = r
-            box.label(text="Move: " + _desc(moving, pm), icon="FORWARD")
-            box.label(text="To: " + _desc(target, pt), icon="PIVOT_CURSOR")
-        box.operator("ifclib.dock", text="Dock")
+            box.operator("ifclib.dock", text="Dock")
+            return
+        tool, (moving, target, pm, pt, arrow_m, arrow_t) = r
+        box.operator("ifclib.dock", text="Dock", icon="SNAP_ON")
+        for title, el, chosen, arrow, action in (("Move", moving, pm, arrow_m, "MOVING"),
+                                                 ("To", target, pt, arrow_t, "TARGET")):
+            sub = box.box()
+            sub.label(text=f"{title}: {el.Name or el.is_a()}", icon="FORWARD" if action == "MOVING" else "PIVOT_CURSOR")
+            col = sub.column(align=True)
+            col.enabled = not arrow
+            op = col.operator("ifclib.dock_option", text="Auto", depress=chosen is None)
+            op.action, op.value = action, ""
+            for p, label in port_labels(tool, el):
+                op = col.operator("ifclib.dock_option", text=label, depress=p == chosen)
+                op.action, op.value = action, str(p.id())
+            if arrow:
+                sub.label(text="Port arrow selected", icon="RESTRICT_SELECT_OFF")
+        d = context.scene.ifclib_dock
+        row = box.row(align=True)
+        op = row.operator("ifclib.dock_option", text=f"Turn 90° ({d.rotation}°)", icon="FILE_REFRESH")
+        op.action = "TURN"
+        op = row.operator("ifclib.dock_option", text="Flip", icon="ARROW_LEFTRIGHT", depress=d.flip)
+        op.action = "FLIP"
+        box.prop(d, "connect")
 
 
 class IFCLIB_PT_mesh_type(bpy.types.Panel):
