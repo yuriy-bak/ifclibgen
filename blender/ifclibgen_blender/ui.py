@@ -46,7 +46,9 @@ class IFCLIB_PT_main(bpy.types.Panel):
             box.operator("ifclib.dock", text="Dock")
             return
         tool, (moving, target, pm, pt, arrow_m, arrow_t) = r
-        box.operator("ifclib.dock", text="Dock", icon="SNAP_ON")
+        row = box.row(align=True)
+        row.operator("ifclib.dock", text="Dock", icon="SNAP_ON")
+        row.operator("ifclib.dock_swap", text="Swap", icon="UV_SYNC_SELECT")
         for title, el, chosen, arrow, action in (("Move", moving, pm, arrow_m, "MOVING"),
                                                  ("To", target, pt, arrow_t, "TARGET")):
             sub = box.box()
