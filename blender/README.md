@@ -2,7 +2,15 @@
 
 Аддон для Blender + Bonsai: стыковка элементов по портам и превращение меша в тип IFC-библиотеки. Ядро `ifclibgen` упаковано внутрь аддона, отдельно ставить не нужно.
 
-## Сборка и установка
+## Установка с автообновлением
+
+Edit ▸ Preferences ▸ Get Extensions, затем Repositories (выпадающий список справа вверху) ▸ + ▸ Add Remote Repository:
+- URL: `https://yuriy-bak.github.io/ifclibgen/index.json`
+- галочка Check for Updates on Startup.
+
+Затем в списке Get Extensions найди IFC Library Tools и нажми Install. Новые версии Blender покажет сам, обновление одной кнопкой. Нужен включённый Bonsai.
+
+## Сборка и установка вручную
 
 ```
 python blender/build.py        # → dist/ifclibgen_blender-<версия>.zip
