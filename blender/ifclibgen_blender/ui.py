@@ -33,9 +33,22 @@ class IFCLIB_PT_main(bpy.types.Panel):
     bl_category = "IFC Lib"
 
     def draw(self, context):
-        layout = self.layout
-        box = layout.box()
-        box.label(text="Dock by ports", icon="SNAP_ON")
+        self.layout.label(text="Library: " + library_dir(), icon="FILE_FOLDER")
+
+
+class IFCLIB_PT_dock(bpy.types.Panel):
+    bl_label = "Dock by ports"
+    bl_idname = "IFCLIB_PT_dock"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "IFC Lib"
+    bl_parent_id = "IFCLIB_PT_main"
+
+    def draw_header(self, context):
+        self.layout.label(icon="SNAP_ON")
+
+    def draw(self, context):
+        box = self.layout
         col = box.column(align=True)
         col.label(text="1. Click the target")
         col.label(text="2. Shift+click the element to move")
@@ -129,4 +142,4 @@ class IFCLIB_PT_mesh_type(bpy.types.Panel):
         layout.label(text="Library: " + library_dir())
 
 
-classes = [IFCLIB_PT_main, IFCLIB_PT_mesh_type]
+classes = [IFCLIB_PT_main, IFCLIB_PT_dock, IFCLIB_PT_mesh_type]
