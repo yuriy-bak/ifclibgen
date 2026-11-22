@@ -6,7 +6,7 @@
 
 В репозитории два выдуманных семейства-примера (`templates/example`). Библиотеки реальных производителей держатся в отдельных репозиториях с той же структурой `templates/` + `data/` и собираются этим же ядром (`--templates`, `--data`). Готовые .ifc в git не кладутся.
 
-Аддон Blender — `blender/` (стыковка по портам, меш → тип IFC), см. [blender/README.md](blender/README.md). Планируется верстак FreeCAD (`freecad/`: семейства как параметрические модели со Spreadsheet, экспорт в библиотеку, вставка и стыковка).
+Аддон Blender — `blender/` (стыковка по портам, меш → тип IFC, обновление типов в проекте из библиотеки), см. [blender/README.md](blender/README.md). Планируется верстак FreeCAD (`freecad/`: семейства как параметрические модели со Spreadsheet, экспорт в библиотеку, вставка и стыковка).
 
 ## Запуск
 
@@ -32,7 +32,7 @@ python -m ifclibgen.preview out/lib/example-dampers.ifc out/p.png "Example dampe
 
 ## Структура
 
-- `ifclibgen/` — ядро: `package.py` (формат пакета), `expr.py` (формулы), `geometry.py` (примитивы → сетки), `core.py` (шаблоны → пакеты → IFC), `check.py`, `preview.py`.
+- `ifclibgen/` — ядро: `package.py` (формат пакета), `expr.py` (формулы), `geometry.py` (примитивы → сетки), `core.py` (шаблоны → пакеты → IFC), `update.py` (обновление типов в проекте: сравнение по хэшу, замена, перенос портов экземпляров, отчёт), `check.py`, `preview.py`.
 - `blender/` — аддон Blender, `tests/` — тесты ядра (`python -m pytest tests`).
 - `templates/<производитель>/<семейство>.yaml` — как строится изделие.
 - `data/<производитель>/*.yaml|csv` — какие типоразмеры генерировать.

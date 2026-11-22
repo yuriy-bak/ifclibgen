@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ADDON = os.path.join(HERE, "ifclibgen_blender")
 CORE = os.path.join(ROOT, "ifclibgen")
-CORE_FILES = ["__init__.py", "core.py", "expr.py", "geometry.py", "package.py"]
+CORE_FILES = ["__init__.py", "core.py", "expr.py", "geometry.py", "package.py", "update.py"]
 
 
 def stage(dest):
