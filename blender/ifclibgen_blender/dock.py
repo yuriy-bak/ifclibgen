@@ -396,8 +396,46 @@ class IFCLIB_OT_dock_option(bpy.types.Operator):
         return bpy.ops.ifclib.dock()
 
 
+class IFCLIB_OT_dock_swap(bpy.types.Operator):
+    """Swap roles: the target becomes the element to move (makes it the active object)"""
+    bl_idname = "ifclib.dock_swap"
+    bl_label = "Swap"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return DockMixin.poll.__func__(cls, context)
+
+    def execute(self, context):
+        import bonsai.tool as tool
+        import ifcopenshell.util.system
+        r = picked(tool, context)
+        if isinstance(r, str):
+            self.report({"ERROR"}, r)
+            return {"CANCELLED"}
+        moving, target = r[0], r[1]
+        new_active = None
+        for o in context.selected_objects:
+            el = tool.Ifc.get_entity(o)
+            if el is not None and el.is_a("IfcDistributionPort"):
+                el = ifcopenshell.util.system.get_port_element(el)
+            if el == target:
+                new_active = o
+                if not tool.Ifc.get_entity(o).is_a("IfcDistributionPort"):
+                    break  # prefer the element itself over its port arrow
+        if new_active is None:
+            return {"CANCELLED"}
+        context.view_layer.objects.active = new_active
+        d = context.scene.ifclib_dock
+        if (d.moving_el, d.target_el) == (moving.id(), target.id()):
+            d.moving_el, d.target_el = d.target_el, d.moving_el
+            d.moving_port, d.target_port = d.target_port, d.moving_port
+            d.rotation, d.flip = 0, False
+        return {"FINISHED"}
+
+
 def make_classes():
-    return [IFCLIB_DockProps, IFCLIB_OT_dock, IFCLIB_OT_dock_option]
+    return [IFCLIB_DockProps, IFCLIB_OT_dock, IFCLIB_OT_dock_option, IFCLIB_OT_dock_swap]
 
 
 def register():
