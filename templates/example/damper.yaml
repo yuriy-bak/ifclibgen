@@ -1,0 +1,33 @@
+# Example family (made up, not a real product): rectangular control damper.
+# Origin: centre of the inlet flange, duct axis along +X.
+manufacturer: Example
+ifc: {class: IfcDamperType, predefined: CONTROLDAMPER}
+name: "Example damper {W}x{H}"
+description: "Rectangular control damper, manual"
+insertion: "centre of the inlet flange, axis along +X"
+params:
+  W: {doc: width, mm}
+  H: {doc: height, mm}
+  F: {doc: flange width, mm, default: 20}
+constants:
+  L: 150
+derived:
+  nb: "max(1, round(H / 150))"
+styles:
+  steel: {rgb: [0.70, 0.72, 0.75]}
+  black: {rgb: [0.15, 0.15, 0.15]}
+default_style: steel
+geometry:
+  - frame: {size: [L, W, H], center: ["L/2", 0, 0], axis: x, wall: 1.5}
+  - frame: {size: [4, "W + 2*F", "H + 2*F"], center: [2, 0, 0], axis: x, wall: F}
+  - frame: {size: [4, "W + 2*F", "H + 2*F"], center: ["L - 2", 0, 0], axis: x, wall: F}
+  - box: {size: [100, "W - 4", 2], center: ["L/2", 0, "-H/2 + H*(i + 0.5)/nb"]}
+    repeat: {var: i, count: nb}
+  - cylinder: {d: 40, from: ["L/2", "-W/2", 0], to: ["L/2", "-W/2 - 50", 0]}
+    style: black
+ports:
+  - {name: Inlet, shape: rect, w: W, h: H, at: [0, 0, 0], dir: [-1, 0, 0], xdir: [0, 1, 0], flow: SINK, system: air}
+  - {name: Outlet, shape: rect, w: W, h: H, at: [L, 0, 0], dir: [1, 0, 0], xdir: [0, 1, 0], flow: SOURCE, system: air}
+psets:
+  Pset_ManufacturerTypeInformation: {Manufacturer: Example, ModelLabel: ED, ModelReference: "ED {W}x{H}"}
+  Pset_DamperTypeCommon: {Operation: MANUAL, NumberofBlades: "=nb"}

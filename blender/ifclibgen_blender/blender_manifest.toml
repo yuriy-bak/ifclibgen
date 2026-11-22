@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+
+id = "ifclibgen_blender"
+version = "0.1.3"
+name = "IFC Library Tools"
+tagline = "Dock MEP elements by ports, turn a mesh into an IFC library type"
+maintainer = "yuriy-bak"
+type = "add-on"
+website = "https://github.com/yuriy-bak/ifclibgen"
+tags = ["Import-Export", "Object"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Writes library .ifc files and package folders to the chosen library folder"

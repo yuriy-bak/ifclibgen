@@ -1,0 +1,6 @@
+template: example/damper
+file: example-dampers
+grid:
+  W: [200, 300, 400, 500, 600]
+  H: [200, 300, 400]
+where: "H <= W"
