@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ifclibgen"
+version = "0.1.0"
+description = "IFC type library generator: families from templates, CAD tools or meshes to IFC4 types with ports"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+dependencies = ["ifcopenshell>=0.8", "pyyaml", "numpy"]
+
+[project.optional-dependencies]
+preview = ["matplotlib"]
+
+[tool.setuptools]
+packages = ["ifclibgen"]
