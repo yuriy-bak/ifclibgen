@@ -174,6 +174,44 @@ def picked(tool, context):
     return moving, target, chosen.get(moving.id()), chosen.get(target.id())
 
 
+def port_labels(tool, element):
+    """[(port, label)] for the element's ports. Bonsai's copies on occurrences have no
+    names: they get the name of the matching type port (by position and axis)."""
+    import ifcopenshell.util.element
+    from .ifclibgen import update
+    ports = list(tool.System.get_ports(element))
+    names = {p: p.Name for p in ports if p.Name}
+    t = ifcopenshell.util.element.get_type(element) if not element.is_a("IfcTypeObject") else None
+    if t is not None and len(names) < len(ports):
+        free = [p for p in ports if p not in names]
+        inv = np.linalg.inv(update.world_matrix(element.ObjectPlacement))
+        tp = {k: v for k, v in update._type_ports(t).items() if k not in names.values()}
+        names.update(update._match_ports(free, inv, tp, update._tol(element.file)))
+    out = []
+    for i, p in enumerate(ports):
+        label = names.get(p) or f"Port {i + 1}"
+        if tool.System.get_connected_port(p) is not None:
+            label += " (connected)"
+        out.append((p, label))
+    return out
+
+
+_ENUM_CACHE = {}  # Blender needs the item strings kept alive
+
+
+def _port_items(element_id):
+    items = [("AUTO", "Auto", "Pick the best port")]
+    try:
+        import bonsai.tool as tool
+        el = tool.Ifc.get().by_id(element_id) if element_id else None
+        if el is not None:
+            items += [(str(p.id()), label, "") for p, label in port_labels(tool, el)]
+    except Exception:
+        pass
+    _ENUM_CACHE[element_id] = items
+    return items
+
+
 class DockMixin:
     """Move the active element so its free port meets a free port of the other selected element, and connect them"""
     bl_idname = "ifclib.dock"
@@ -188,6 +226,26 @@ class DockMixin:
                        description="The moving port faces the same way as the target port. "
                                    "Use when a port arrow points into the body")
     connect: BoolProperty(name="Connect ports", default=True)
+    # Filled on the first run from the selection; afterwards the lists in the
+    # Adjust Last Operation panel switch the ports.
+    moving_id: IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    target_id: IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    moving_port: EnumProperty(name="Moving port", items=lambda self, c: _port_items(self.moving_id),
+                              options={"SKIP_SAVE"})
+    target_port: EnumProperty(name="Target port", items=lambda self, c: _port_items(self.target_id),
+                              options={"SKIP_SAVE"})
+    started: BoolProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.prop(self, "moving_port")
+        col.prop(self, "target_port")
+        row = col.row()
+        row.enabled = self.moving_port == "AUTO" or self.target_port == "AUTO"
+        row.prop(self, "pair")
+        col.prop(self, "rotation")
+        col.prop(self, "flip")
+        col.prop(self, "connect")
 
     @classmethod
     def poll(cls, context):
@@ -220,6 +278,14 @@ class DockMixin:
             self.report({"ERROR"}, r)
             return {"CANCELLED"}
         moving, target, only_m, only_t = r
+        if not self.started or self.moving_id != moving.id() or self.target_id != target.id():
+            self.started = True
+            self.moving_id, self.target_id = moving.id(), target.id()
+            self.moving_port = str(only_m.id()) if only_m else "AUTO"
+            self.target_port = str(only_t.id()) if only_t else "AUTO"
+        else:
+            only_m = ifc.by_id(int(self.moving_port)) if self.moving_port != "AUTO" else None
+            only_t = ifc.by_id(int(self.target_port)) if self.target_port != "AUTO" else None
         obj, other = tool.Ifc.get_object(moving), tool.Ifc.get_object(target)
         if obj is None or other is None:
             self.report({"ERROR"}, "The element is not loaded in the scene")
@@ -256,7 +322,9 @@ class DockMixin:
             if tool.System.get_connected_port(pm) is not None:
                 tool.Ifc.run("system.disconnect_port", port=pm)
             tool.Ifc.run("system.connect_port", port1=pm, port2=pt, direction=pm.FlowDirection or "NOTDEFINED")
-        msg = f"Docked {pm.Name or 'port'} → {pt.Name or 'port'} ({len(pairs)} pair(s) possible)"
+        lm, lt = dict(port_labels(tool, moving)), dict(port_labels(tool, target))
+        short = lambda d, p: d.get(p, "port").replace(" (connected)", "")
+        msg = f"Docked {short(lm, pm)} → {short(lt, pt)} ({len(pairs)} pair(s) possible)"
         warn = []
         if not same:
             warn.append("port sizes differ")
