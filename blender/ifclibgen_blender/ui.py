@@ -12,6 +12,24 @@ def _is_ifc(obj):
         return False
 
 
+def _picked(context):
+    try:
+        import bonsai.tool as tool
+        if tool.Ifc.get() is None:
+            return "Open an IFC project (Bonsai)"
+    except ImportError:
+        return "Bonsai is not enabled"
+    from .dock import picked
+    return picked(tool, context)
+
+
+def _desc(el, port):
+    name = el.Name or el.is_a()
+    if port is None:
+        return name + " (port: auto)"
+    return f"{name}, port {port.Name or '#' + str(port.id())}"
+
+
 class IFCLIB_PT_main(bpy.types.Panel):
     bl_label = "IFC Library"
     bl_idname = "IFCLIB_PT_main"
@@ -26,14 +44,14 @@ class IFCLIB_PT_main(bpy.types.Panel):
         col = box.column(align=True)
         col.label(text="1. Click the target")
         col.label(text="2. Shift+click the element to move")
-        sel = context.selected_objects
-        act = context.active_object
-        if len(sel) == 2 and act in sel:
-            other = next(o for o in sel if o != act)
-            box.label(text=f"Move: {act.name}", icon="FORWARD")
-            box.label(text=f"To: {other.name}", icon="PIVOT_CURSOR")
+        col.label(text="To pick ports: Show Ports, select arrows")
+        r = _picked(context)
+        if isinstance(r, str):
+            box.label(text=r, icon="INFO")
         else:
-            box.label(text=f"Selected: {len(sel)} (need 2)", icon="INFO")
+            moving, target, pm, pt = r
+            box.label(text="Move: " + _desc(moving, pm), icon="FORWARD")
+            box.label(text="To: " + _desc(target, pt), icon="PIVOT_CURSOR")
         box.operator("ifclib.dock", text="Dock")
 
 

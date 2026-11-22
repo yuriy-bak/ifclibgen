@@ -44,13 +44,17 @@ def _flows_match(a, b):
     return {a, b} == {"SOURCE", "SINK"}
 
 
-def candidate_pairs(tool, moving, target, unit, any_port=False):
+def candidate_pairs(tool, moving, target, unit, any_port=False, only_m=None, only_t=None):
     """Port pairs, best first: same shape and size, opposite flow, then nearest.
 
     Normally only free ports, plus ports already connected between these two
     elements (re-docking after a manual move). any_port=True takes every port;
-    the chosen ones get disconnected from whatever they were connected to."""
+    the chosen ones get disconnected from whatever they were connected to.
+    only_m / only_t: ports picked by the user, used whether free or not."""
     def usable(el, other):
+        only = only_m if el == moving else only_t
+        if only is not None:
+            return [only]
         out = []
         for p in tool.System.get_ports(el):
             c = tool.System.get_connected_port(p)
@@ -80,18 +84,20 @@ def _blender_matrix(m, unit):
     return Matrix(m.tolist())
 
 
-def mt_pose(mp, mt, size_m, size_t, extra_deg=0):
+def mt_pose(mp, mt, size_m, size_t, extra_deg=0, flip=False):
     """New world pose of the moving port: at the target port, facing it, with the least turn.
 
     The element keeps its current orientation as far as possible: only the rotation
     that makes the two port axes opposite is applied. Round ports keep any twist
     around the axis; rectangular ones snap to the nearest twist where the sides line
-    up (multiples of 180°, or 90° for a square / swapped sides)."""
+    up (multiples of 180°, or 90° for a square / swapped sides).
+    flip=True: the moving port faces the same way as the target port instead
+    (for a port whose arrow points into the body)."""
     from mathutils import Quaternion, Vector
     rp = mp.to_quaternion()
     zp, xp = mp.col[2].xyz.normalized(), mp.col[0].xyz.normalized()
     zt, xt = mt.col[2].xyz.normalized(), mt.col[0].xyz.normalized()
-    want = -zt
+    want = zt if flip else -zt
     if zp.dot(want) < -0.9999:  # pointing the same way: half turn, around world Z when possible
         axis = Vector((0, 0, 1))
         axis = (axis - zp * axis.dot(zp))
@@ -124,6 +130,50 @@ def mt_pose(mp, mt, size_m, size_t, extra_deg=0):
     return pose
 
 
+def _sync_port_objects(tool, element, obj, unit):
+    """Shown port arrows (Show Ports) are put where the IFC ports are now."""
+    w = _blender_matrix(_placement(element.ObjectPlacement), unit).inverted()
+    for p in tool.System.get_ports(element):
+        po = tool.Ifc.get_object(p)
+        if po is None:
+            continue
+        po.matrix_world = obj.matrix_world @ w @ _blender_matrix(_placement(p.ObjectPlacement), unit)
+        tool.Geometry.record_object_position(po)
+
+
+def picked(tool, context):
+    """Selection -> (moving element, target element, picked moving port, picked target port).
+
+    Elements or their port arrows (Bonsai ▸ Show Ports) can be selected; the active
+    one moves. A selected port arrow fixes the port to use on its element.
+    Returns a string with the reason when the selection does not fit."""
+    import ifcopenshell.util.system
+    active = context.active_object
+    if active is None or not active.select_get():
+        return "Shift+click the element (or its port) to move last"
+    chosen, order = {}, []
+    for obj in [o for o in context.selected_objects if o != active] + [active]:
+        el = tool.Ifc.get_entity(obj)
+        if el is None:
+            return f"{obj.name} is not an IFC element"
+        if el.is_a("IfcDistributionPort"):
+            port, el = el, ifcopenshell.util.system.get_port_element(el)
+            if el is None:
+                return "A selected port belongs to no element"
+            if chosen.get(el.id(), port) != port:
+                return "Pick one port per element"
+            chosen[el.id()] = port
+        if el not in order:
+            order.append(el)
+        elif obj == active:
+            order.remove(el)
+            order.append(el)
+    if len(order) != 2:
+        return f"Select 2 elements or their ports (now {len(order)}): target, then Shift+click the one to move"
+    target, moving = order
+    return moving, target, chosen.get(moving.id()), chosen.get(target.id())
+
+
 class DockMixin:
     """Move the active element so its free port meets a free port of the other selected element, and connect them"""
     bl_idname = "ifclib.dock"
@@ -134,13 +184,23 @@ class DockMixin:
                       description="0 = best match; increase to try the next pair")
     rotation: EnumProperty(name="Extra turn around port axis", items=[
         ("0", "0°", ""), ("90", "90°", ""), ("180", "180°", ""), ("270", "270°", "")], default="0")
+    flip: BoolProperty(name="Flip direction", default=False,
+                       description="The moving port faces the same way as the target port. "
+                                   "Use when a port arrow points into the body")
     connect: BoolProperty(name="Connect ports", default=True)
 
     @classmethod
     def poll(cls, context):
-        n = len(context.selected_objects)
-        if n != 2 or context.active_object is None or not context.active_object.select_get():
-            cls.poll_message_set(f"Select exactly 2 elements (now {n}): target, then Shift+click the one to move")
+        try:
+            import bonsai.tool as tool
+            if tool.Ifc.get() is None:
+                raise ImportError
+        except ImportError:
+            cls.poll_message_set("Open an IFC project (Bonsai)")
+            return False
+        r = picked(tool, context)
+        if isinstance(r, str):
+            cls.poll_message_set(r)
             return False
         return True
 
@@ -155,19 +215,22 @@ class DockMixin:
         if not ifc:
             self.report({"ERROR"}, "No IFC project open")
             return {"CANCELLED"}
-        obj = context.active_object
-        other = next(o for o in context.selected_objects if o != obj)
-        moving, target = tool.Ifc.get_entity(obj), tool.Ifc.get_entity(other)
-        if not moving or not target:
-            self.report({"ERROR"}, "Both selected objects must be IFC elements")
+        r = picked(tool, context)
+        if isinstance(r, str):
+            self.report({"ERROR"}, r)
+            return {"CANCELLED"}
+        moving, target, only_m, only_t = r
+        obj, other = tool.Ifc.get_object(moving), tool.Ifc.get_object(target)
+        if obj is None or other is None:
+            self.report({"ERROR"}, "The element is not loaded in the scene")
             return {"CANCELLED"}
         for o in (obj, other):
             tool.Model.sync_object_ifc_position(o)
         unit = ifcopenshell.util.unit.calculate_unit_scale(ifc)
-        pairs = candidate_pairs(tool, moving, target, unit)
+        pairs = candidate_pairs(tool, moving, target, unit, only_m=only_m, only_t=only_t)
         reused = False
         if not pairs:
-            pairs = candidate_pairs(tool, moving, target, unit, any_port=True)
+            pairs = candidate_pairs(tool, moving, target, unit, any_port=True, only_m=only_m, only_t=only_t)
             reused = True
         if not pairs:
             self.report({"ERROR"}, "One of the elements has no ports")
@@ -178,11 +241,12 @@ class DockMixin:
         mp = _blender_matrix(_placement(pm.ObjectPlacement), unit)
         mt = _blender_matrix(_placement(pt.ObjectPlacement), unit)
         local = w.inverted() @ mp  # port in element coordinates
-        new = mt_pose(mp, mt, _port_size(pm), _port_size(pt), int(self.rotation)) @ local.inverted()
+        new = mt_pose(mp, mt, _port_size(pm), _port_size(pt), int(self.rotation), self.flip) @ local.inverted()
         # keep Blender's object offset (if any) out of it: apply the change, not the absolute value
         obj.matrix_world = new @ w.inverted() @ obj.matrix_world
         context.view_layer.update()
         bpy.ops.bim.edit_object_placement(obj=obj.name)
+        _sync_port_objects(tool, moving, obj, unit)
 
         for p in (pm, pt):
             c = tool.System.get_connected_port(p)
