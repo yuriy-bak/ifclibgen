@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>IFC Library</name>
+  <description>Families of MEP types: ports on faces, sizes from a spreadsheet, export to an IFC type library</description>
+  <version>0.1.0</version>
+  <maintainer email="noreply@github.com">yuriy-bak</maintainer>
+  <license file="LICENSE">GPL-3.0-or-later</license>
+  <url type="repository" branch="main">https://github.com/yuriy-bak/ifclibgen</url>
+  <content>
+    <workbench>
+      <classname>IfcLibGenWorkbench</classname>
+      <subdirectory>./</subdirectory>
+      <icon>libgen_fc/icons/workbench.svg</icon>
+      <freecadmin>1.0.0</freecadmin>
+    </workbench>
+  </content>
+</package>
